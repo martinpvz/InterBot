@@ -4,11 +4,17 @@ import { env } from '../config/env.js';
 
 const { Pool } = pg;
 
+function resolveSslConfig() {
+  if (env.databaseSslMode === 'disable') {
+    return false;
+  }
+
+  return { rejectUnauthorized: false };
+}
+
 const pool = new Pool({
   connectionString: env.databaseUrl,
-  ssl: env.nodeEnv === 'development'
-    ? false
-    : { rejectUnauthorized: false },
+  ssl: resolveSslConfig(),
 });
 
 export { pool };

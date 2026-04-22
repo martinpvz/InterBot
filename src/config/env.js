@@ -27,6 +27,7 @@ const env = {
   timezone: optional('TIMEZONE', 'America/Mexico_City'),
   port: Number(optional('PORT', '3000')),
   nodeEnv: optional('NODE_ENV', 'development'),
+  databaseSslMode: optional('DATABASE_SSL_MODE', 'require'),
 };
 
 if (Number.isNaN(env.port)) {
