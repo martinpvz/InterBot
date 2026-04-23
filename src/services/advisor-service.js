@@ -46,18 +46,6 @@ async function assignAdvisor({ userId, ramaLabel, pasoLabel, customerProfile }) 
           `Circulo medico reembolso: ${customerProfile.policyCoverage.reimbursementMedicalCircle}`,
         ]
       : [];
-    const policyBenefitLines = Array.isArray(customerProfile?.policyBenefits) && customerProfile.policyBenefits.length > 0
-      ? customerProfile.policyBenefits.map((benefit) => {
-          const detailParts = [
-            benefit.status,
-            formatBenefitValue(benefit.value, benefit.unit),
-            benefit.observations,
-          ].filter(Boolean);
-
-          return `${benefit.coverage}: ${detailParts.join(' | ') || 'Sin detalle disponible'}`;
-        })
-      : [];
-
     const consultationLines = [
       `Ramo: ${ramaLabel || 'Sin definir'}`,
       `Tema: ${pasoLabel || 'Orientacion general'}`,
@@ -69,7 +57,6 @@ async function assignAdvisor({ userId, ramaLabel, pasoLabel, customerProfile }) 
       'Resumen del asegurado:',
       ...(customerLines.length > 0 ? customerLines : ['Sin datos de asegurado identificados.']),
       ...(policyCoverageLines.length > 0 ? ['', 'Datos de poliza:', ...policyCoverageLines] : []),
-      ...(policyBenefitLines.length > 0 ? ['', 'Coberturas registradas:', ...policyBenefitLines] : []),
       '',
       'Consulta actual:',
       ...consultationLines,
@@ -86,17 +73,6 @@ async function assignAdvisor({ userId, ramaLabel, pasoLabel, customerProfile }) 
       waLink: `https://wa.me/${env.countryCode}${advisor.phone_number}?text=${message}`,
     };
   });
-}
-
-function formatBenefitValue(value, unit) {
-  const cleanValue = String(value ?? '').trim();
-  const cleanUnit = String(unit ?? '').trim();
-
-  if (!cleanValue) {
-    return '';
-  }
-
-  return cleanUnit ? `${cleanValue} ${cleanUnit}` : cleanValue;
 }
 
 export { assignAdvisor };
