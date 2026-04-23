@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createClient } from '@supabase/supabase-js';
 
+import { env } from '../../config/env.js';
 import { logger } from '../../lib/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -12,13 +14,37 @@ let records = [];
 let recordsByPolicyNumber = new Map();
 let recordsByNormalizedName = new Map();
 
-function loadCustomerRecords() {
-  if (!fs.existsSync(csvPath)) {
-    logger.warn('No se encontro el CSV de asegurados', { csvPath });
+async function initializeCustomerCatalog() {
+  const content = await loadCsvContent();
+
+  if (!content) {
+    records = [];
+    recordsByPolicyNumber = new Map();
+    recordsByNormalizedName = new Map();
     return;
   }
 
-  const content = fs.readFileSync(csvPath, 'utf8');
+  loadCustomerRecordsFromContent(content);
+}
+
+async function loadCsvContent() {
+  if (shouldLoadFromSupabaseStorage()) {
+    const remoteContent = await loadCsvFromSupabaseStorage();
+
+    if (remoteContent) {
+      return remoteContent;
+    }
+  }
+
+  if (!fs.existsSync(csvPath)) {
+    logger.warn('No se encontro el CSV de asegurados ni en Storage ni en disco local', { csvPath });
+    return null;
+  }
+
+  return fs.readFileSync(csvPath, 'utf8');
+}
+
+function loadCustomerRecordsFromContent(content) {
   const lines = content
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -45,9 +71,44 @@ function loadCustomerRecords() {
   }
 
   logger.info('Catalogo de asegurados cargado', {
-    csvPath,
+    source: shouldLoadFromSupabaseStorage() ? 'supabase-storage-or-local-fallback' : 'local-file',
     totalRecords: records.length,
   });
+}
+
+async function loadCsvFromSupabaseStorage() {
+  const supabase = createClient(env.supabaseUrl, env.supabaseStorageServiceKey, {
+    auth: { persistSession: false },
+  });
+
+  const { data, error } = await supabase.storage
+    .from(env.customerCsvBucket)
+    .download(env.customerCsvPath);
+
+  if (error) {
+    logger.warn('No se pudo descargar el CSV desde Supabase Storage', {
+      bucket: env.customerCsvBucket,
+      path: env.customerCsvPath,
+      error: error.message,
+    });
+    return null;
+  }
+
+  logger.info('CSV descargado desde Supabase Storage', {
+    bucket: env.customerCsvBucket,
+    path: env.customerCsvPath,
+  });
+
+  return await data.text();
+}
+
+function shouldLoadFromSupabaseStorage() {
+  return Boolean(
+    env.supabaseUrl &&
+    env.supabaseStorageServiceKey &&
+    env.customerCsvBucket &&
+    env.customerCsvPath,
+  );
 }
 
 function parseCsvLine(line) {
@@ -143,13 +204,12 @@ function getAllCustomerRecords() {
   return records;
 }
 
-loadCustomerRecords();
-
 export {
   getAllCustomerRecords,
   findCustomersByFullName,
   findCustomersByPolicyNumber,
   getCustomerCatalogStats,
+  initializeCustomerCatalog,
   normalizeName,
   normalizePolicyNumber,
 };

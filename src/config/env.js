@@ -28,6 +28,10 @@ const env = {
   port: Number(optional('PORT', '3000')),
   nodeEnv: optional('NODE_ENV', 'development'),
   databaseSslMode: optional('DATABASE_SSL_MODE', 'require'),
+  supabaseUrl: optional('SUPABASE_URL'),
+  supabaseStorageServiceKey: optional('SUPABASE_STORAGE_SERVICE_KEY'),
+  customerCsvBucket: optional('CUSTOMER_CSV_BUCKET'),
+  customerCsvPath: optional('CUSTOMER_CSV_PATH', 'asegurados.csv'),
 };
 
 if (Number.isNaN(env.port)) {
