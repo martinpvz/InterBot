@@ -32,6 +32,7 @@ const env = {
   supabaseStorageServiceKey: optional('SUPABASE_STORAGE_SERVICE_KEY'),
   customerCsvBucket: optional('CUSTOMER_CSV_BUCKET'),
   customerCsvPath: optional('CUSTOMER_CSV_PATH', 'asegurados.csv'),
+  policyCoverageCsvPath: optional('POLICY_COVERAGE_CSV_PATH', 'base_polizas_cobertura.xlsx'),
 };
 
 if (Number.isNaN(env.port)) {

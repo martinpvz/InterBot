@@ -36,6 +36,16 @@ async function assignAdvisor({ userId, ramaLabel, pasoLabel, customerProfile }) 
           `Grupo economico: ${customerProfile.economicGroup}`,
         ]
       : [];
+    const policyCoverageLines = customerProfile?.policyCoverage
+      ? [
+          `Perfil: ${customerProfile.policyCoverage.profile}`,
+          `Plan: ${customerProfile.policyCoverage.plan}`,
+          `Subgrupo: ${customerProfile.policyCoverage.subGroup}`,
+          `No. filial: ${customerProfile.policyCoverage.branchNumber}`,
+          `Circulo medico: ${customerProfile.policyCoverage.medicalCircle}`,
+          `Circulo medico reembolso: ${customerProfile.policyCoverage.reimbursementMedicalCircle}`,
+        ]
+      : [];
 
     const consultationLines = [
       `Ramo: ${ramaLabel || 'Sin definir'}`,
@@ -47,6 +57,7 @@ async function assignAdvisor({ userId, ramaLabel, pasoLabel, customerProfile }) 
       '',
       'Resumen del asegurado:',
       ...(customerLines.length > 0 ? customerLines : ['Sin datos de asegurado identificados.']),
+      ...(policyCoverageLines.length > 0 ? ['', 'Datos de poliza:', ...policyCoverageLines] : []),
       '',
       'Consulta actual:',
       ...consultationLines,

@@ -48,6 +48,7 @@ function formatCustomerProfile(customer) {
     insurer: customer.insurer,
     relationship: customer.relationship,
     age: customer.age,
+    policyCoverage: customer.policyCoverage,
   };
 }
 
