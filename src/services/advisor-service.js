@@ -7,7 +7,7 @@ import {
 } from '../repositories/advisor-repository.js';
 import { HttpError } from '../lib/http-error.js';
 
-async function assignAdvisor({ userId, ramaLabel, pasoLabel }) {
+async function assignAdvisor({ userId, ramaLabel, pasoLabel, customerProfile }) {
   return runInTransaction(async (client) => {
     const advisors = await getActiveAdvisors(client);
 
@@ -25,14 +25,37 @@ async function assignAdvisor({ userId, ramaLabel, pasoLabel }) {
       stepLabel: pasoLabel || null,
     });
 
-    const context = ramaLabel && pasoLabel
-      ? `Tengo una consulta sobre *${ramaLabel}* especificamente en el apartado de *${pasoLabel}*.`
-      : ramaLabel
-        ? `Tengo una consulta sobre *${ramaLabel}*.`
-        : 'Requiero orientacion con mi caso.';
+    const customerLines = customerProfile
+      ? [
+          `Nombre: ${customerProfile.fullName}`,
+          `Poliza: ${customerProfile.policyNumber}`,
+          `Genero: ${customerProfile.gender}`,
+          `Aseguradora: ${customerProfile.insurer}`,
+          `Parentesco: ${customerProfile.relationship}`,
+          `Edad: ${customerProfile.age}`,
+          `Grupo economico: ${customerProfile.economicGroup}`,
+        ]
+      : [];
+
+    const consultationLines = [
+      `Ramo: ${ramaLabel || 'Sin definir'}`,
+      `Tema: ${pasoLabel || 'Orientacion general'}`,
+    ];
+
+    const messageBody = [
+      `Hola, me comunico desde el chatbot de ${env.companyName}.`,
+      '',
+      'Resumen del asegurado:',
+      ...(customerLines.length > 0 ? customerLines : ['Sin datos de asegurado identificados.']),
+      '',
+      'Consulta actual:',
+      ...consultationLines,
+      '',
+      'Me podria apoyar, por favor?',
+    ].join('\n');
 
     const message = encodeURIComponent(
-      `Hola, me comunico desde el chatbot de ${env.companyName}. ${context} Me podria apoyar?`,
+      messageBody,
     );
 
     return {

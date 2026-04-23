@@ -3,6 +3,10 @@ const defaultSession = {
   paso: 'inicio',
   ramaLabel: '',
   pasoLabel: '',
+  identificationAttempted: false,
+  identificationStep: null,
+  identificationContext: null,
+  customerProfile: null,
 };
 
 async function getSessionByUserId(client, userId) {
