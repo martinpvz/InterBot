@@ -18,9 +18,31 @@ function resetSession(state) {
   state.pasoLabel = '';
 }
 
+function resetCustomerIdentity(state) {
+  state.identificationAttempted = false;
+  state.identificationStep = null;
+  state.identificationContext = null;
+  state.customerProfile = null;
+}
+
 async function processIncomingText({ phoneNumber, userId, state, text }) {
   const normalizedText = text.trim();
   const lowered = normalizedText.toLowerCase();
+
+  if (
+    lowered === 'no soy yo' ||
+    lowered.includes('cambiar usuario') ||
+    lowered.includes('reiniciar datos')
+  ) {
+    resetSession(state);
+    resetCustomerIdentity(state);
+    await sendText({
+      to: phoneNumber,
+      userId,
+      text: 'Entendido. Vamos a reiniciar tu identificacion. Comparte tu numero de poliza o tu nombre completo.',
+    });
+    return state;
+  }
 
   if (
     normalizedText === 'asesor' ||
@@ -103,12 +125,18 @@ async function processIncomingText({ phoneNumber, userId, state, text }) {
         body: `${action.body}\n\n_Ramo: ${state.ramaLabel}_`,
         footer: env.companyName,
         buttons: [
-          { id: branchDefinition.backId, title: 'Volver al menu' },
-          { id: 'asesor', title: 'Hablar con asesor' },
+          { id: branchDefinition.backId, title: '↩️ Submenu' },
+          { id: 'menu_principal', title: '🏠 Inicio' },
+          { id: 'asesor', title: '👤 Asesor' },
         ],
       });
 
       return state;
+    }
+
+    if (normalizedText === 'menu_principal') {
+      resetSession(state);
+      return processIncomingText({ phoneNumber, userId, state, text: 'inicio' });
     }
   }
 
