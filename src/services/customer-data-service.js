@@ -49,6 +49,7 @@ function formatCustomerProfile(customer) {
     relationship: customer.relationship,
     age: customer.age,
     policyCoverage: customer.policyCoverage,
+    policyBenefits: customer.policyBenefits ?? [],
   };
 }
 

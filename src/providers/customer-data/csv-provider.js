@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import { createClient } from '@supabase/supabase-js';
 import * as XLSX from 'xlsx';
 
@@ -9,82 +10,145 @@ import { logger } from '../../lib/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const csvPath = path.resolve(__dirname, '../../../data/asegurados.csv');
-const policyCoverageXlsxPath = path.resolve(__dirname, '../../../data/base_polizas_cobertura.xlsx');
-const policyCoverageCsvPath = path.resolve(__dirname, '../../../data/base_polizas_cobertura.csv');
+const insuredCsvPath = path.resolve(__dirname, '../../../data/asegurados.csv');
+const policyWorkbookXlsxPath = path.resolve(__dirname, '../../../data/base_polizas_cobertura.xlsx');
+const policyWorkbookCsvPath = path.resolve(__dirname, '../../../data/base_polizas_cobertura.csv');
 
 let records = [];
 let recordsByPolicyNumber = new Map();
 let recordsByNormalizedName = new Map();
-let policyCoverages = [];
 let policyCoveragesBySubGroup = new Map();
+let policyBenefitsBySubGroup = new Map();
 
 async function initializeCustomerCatalog() {
-  const content = await loadCsvContent();
+  const insuredContent = await loadInsuredCsvContent();
 
-  if (!content) {
+  if (!insuredContent) {
     records = [];
     recordsByPolicyNumber = new Map();
     recordsByNormalizedName = new Map();
     return;
   }
 
-  loadCustomerRecordsFromContent(content);
-  const policyCoverageContent = await loadPolicyCoverageCsvContent();
+  loadCustomerRecordsFromContent(insuredContent);
 
-  if (policyCoverageContent) {
-    loadPolicyCoveragesFromContent(policyCoverageContent);
-    enrichCustomerRecordsWithPolicyCoverage();
+  const policyWorkbookData = await loadPolicyWorkbookData();
+
+  if (policyWorkbookData.summaryContent) {
+    loadPolicySummariesFromContent(policyWorkbookData.summaryContent);
+  }
+
+  if (policyWorkbookData.benefitsContent) {
+    loadPolicyBenefitsFromContent(policyWorkbookData.benefitsContent);
+  }
+
+  if (policyWorkbookData.summaryContent || policyWorkbookData.benefitsContent) {
+    enrichCustomerRecordsWithPolicyData();
   }
 }
 
-async function loadCsvContent() {
+async function loadInsuredCsvContent() {
   if (shouldLoadFromSupabaseStorage()) {
-    const remoteContent = await loadCsvFromSupabaseStorage(env.customerCsvPath);
+    const remoteContent = await loadTextFileFromSupabaseStorage(env.customerCsvPath, 'CSV de asegurados');
 
     if (remoteContent) {
       return remoteContent;
     }
   }
 
-  if (!fs.existsSync(csvPath)) {
-    logger.warn('No se encontro el CSV de asegurados ni en Storage ni en disco local', { csvPath });
+  if (!fs.existsSync(insuredCsvPath)) {
+    logger.warn('No se encontro el CSV de asegurados ni en Storage ni en disco local', { insuredCsvPath });
     return null;
   }
 
-  return fs.readFileSync(csvPath, 'utf8');
+  return fs.readFileSync(insuredCsvPath, 'utf8');
 }
 
-async function loadPolicyCoverageCsvContent() {
+async function loadPolicyWorkbookData() {
   if (shouldLoadFromSupabaseStorage()) {
-    const remoteContent = await loadSpreadsheetFromSupabaseStorage(env.policyCoverageCsvPath);
+    const workbookBuffer = await loadBinaryFileFromSupabaseStorage(
+      env.policyCoverageCsvPath,
+      'archivo de polizas/coberturas',
+    );
 
-    if (remoteContent) {
-      return remoteContent;
+    if (workbookBuffer) {
+      return parsePolicyWorkbookBuffer(workbookBuffer, env.policyCoverageCsvPath);
     }
   }
 
-  const localPath = resolveExistingLocalPolicyCoveragePath();
+  const localPath = resolveExistingLocalPolicyWorkbookPath();
 
   if (!localPath) {
-    logger.info('No se encontro CSV de coberturas de poliza; se continua sin enriquecimiento', {
-      policyCoverageXlsxPath,
-      policyCoverageCsvPath,
+    logger.info('No se encontro archivo local de polizas/coberturas; se continua sin enriquecimiento', {
+      policyWorkbookXlsxPath,
+      policyWorkbookCsvPath,
     });
-    return null;
+    return { summaryContent: null, benefitsContent: null };
   }
 
-  return readSpreadsheetFromLocalFile(localPath);
+  if (isXlsxPath(localPath)) {
+    return parsePolicyWorkbookBuffer(fs.readFileSync(localPath), localPath);
+  }
+
+  const csvContent = fs.readFileSync(localPath, 'utf8');
+  return { summaryContent: csvContent, benefitsContent: null };
+}
+
+function parsePolicyWorkbookBuffer(buffer, sourceLabel) {
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
+
+  const summarySheetName = findWorkbookSheetName(workbook, [
+    'Base normalizada de pólizas',
+    'Base normalizada de polizas',
+    'Base_Polizas',
+    'Base polizas',
+  ]);
+  const benefitsSheetName = findWorkbookSheetName(workbook, [
+    'Base_Coberturas',
+    'Base coberturas',
+    'Coberturas',
+  ]);
+
+  const summaryContent = summarySheetName
+    ? sheetToCsv(workbook, summarySheetName)
+    : null;
+  const benefitsContent = benefitsSheetName
+    ? sheetToCsv(workbook, benefitsSheetName)
+    : null;
+
+  logger.info('Workbook de polizas/coberturas procesado', {
+    source: sourceLabel,
+    summarySheetName,
+    benefitsSheetName,
+  });
+
+  return { summaryContent, benefitsContent };
+}
+
+function findWorkbookSheetName(workbook, candidates) {
+  const normalizedCandidates = candidates.map(normalizeSheetName);
+
+  return workbook.SheetNames.find((sheetName) => normalizedCandidates.includes(normalizeSheetName(sheetName))) ?? null;
+}
+
+function normalizeSheetName(value) {
+  return String(value ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+}
+
+function sheetToCsv(workbook, sheetName) {
+  return XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName], { blankrows: false });
 }
 
 function loadCustomerRecordsFromContent(content) {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lines = toNonEmptyLines(content);
 
   if (lines.length <= 1) {
-    logger.warn('El CSV de asegurados esta vacio', { csvPath });
+    logger.warn('El CSV de asegurados esta vacio', { insuredCsvPath });
     return;
   }
 
@@ -92,16 +156,10 @@ function loadCustomerRecordsFromContent(content) {
 
   records = lines
     .slice(1)
-    .map((line) => buildRecord(headers, parseCsvLine(line)))
+    .map((line) => buildInsuredRecord(headers, parseCsvLine(line)))
     .filter(Boolean);
 
-  recordsByPolicyNumber = new Map();
-  recordsByNormalizedName = new Map();
-
-  for (const record of records) {
-    indexRecord(recordsByPolicyNumber, normalizePolicyNumber(record.policyNumber), record);
-    indexRecord(recordsByNormalizedName, normalizeName(record.fullName), record);
-  }
+  rebuildInsuredIndexes();
 
   logger.info('Catalogo de asegurados cargado', {
     source: shouldLoadFromSupabaseStorage() ? 'supabase-storage-or-local-fallback' : 'local-file',
@@ -109,103 +167,128 @@ function loadCustomerRecordsFromContent(content) {
   });
 }
 
-function loadPolicyCoveragesFromContent(content) {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+function loadPolicySummariesFromContent(content) {
+  const lines = toNonEmptyLines(content);
 
   if (lines.length <= 1) {
-    logger.warn('El archivo de coberturas esta vacio', { policyCoverageXlsxPath, policyCoverageCsvPath });
+    logger.warn('La hoja/base de polizas esta vacia');
     return;
   }
 
   const headerLineIndex = findHeaderLineIndex(lines, 'Poliza_ID');
 
   if (headerLineIndex === -1) {
-    logger.warn('No se encontro encabezado Poliza_ID en el CSV de coberturas');
+    logger.warn('No se encontro encabezado Poliza_ID en la base de polizas');
     return;
   }
 
   const headers = parseCsvLine(lines[headerLineIndex]);
-
-  policyCoverages = lines
-    .slice(headerLineIndex + 1)
-    .map((line) => buildPolicyCoverage(headers, parseCsvLine(line)))
-    .filter(Boolean);
-
   policyCoveragesBySubGroup = new Map();
 
-  for (const coverage of policyCoverages) {
-    policyCoveragesBySubGroup.set(normalizePolicyNumber(coverage.subGroup), coverage);
-  }
+  lines
+    .slice(headerLineIndex + 1)
+    .map((line) => buildPolicySummary(headers, parseCsvLine(line)))
+    .filter(Boolean)
+    .forEach((summary) => {
+      policyCoveragesBySubGroup.set(normalizePolicyKey(summary.subGroup), summary);
+    });
 
-  logger.info('Catalogo de coberturas cargado', {
-    totalRecords: policyCoverages.length,
+  logger.info('Catalogo de polizas cargado', {
+    totalRecords: policyCoveragesBySubGroup.size,
   });
 }
 
-function findHeaderLineIndex(lines, expectedHeader) {
-  return lines.findIndex((line) => parseCsvLine(line).includes(expectedHeader));
-}
+function loadPolicyBenefitsFromContent(content) {
+  const lines = toNonEmptyLines(content);
 
-function buildPolicyCoverage(headers, values) {
-  if (headers.length !== values.length) {
-    return null;
+  if (lines.length <= 1) {
+    logger.warn('La hoja/base de coberturas esta vacia');
+    return;
   }
 
-  const row = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']));
+  const headerLineIndex = findHeaderLineIndex(lines, 'Poliza_ID');
 
-  if (!row.SubGrupo) {
-    return null;
+  if (headerLineIndex === -1) {
+    logger.warn('No se encontro encabezado Poliza_ID en la base de coberturas');
+    return;
   }
 
-  return {
-    policyId: row.Poliza_ID,
-    profile: row.Perfil,
-    branchNumber: row.No_Filial,
-    subGroup: row.SubGrupo,
-    plan: row.Plan,
-    medicalCircle: row.Circulo_Medico,
-    reimbursementMedicalCircle: row.Circulo_Medico_Reembolso,
-  };
+  const headers = parseCsvLine(lines[headerLineIndex]);
+  policyBenefitsBySubGroup = new Map();
+
+  lines
+    .slice(headerLineIndex + 1)
+    .map((line) => buildPolicyBenefit(headers, parseCsvLine(line)))
+    .filter(Boolean)
+    .forEach((benefit) => {
+      const key = normalizePolicyKey(benefit.subGroup);
+      const existing = policyBenefitsBySubGroup.get(key) ?? [];
+      existing.push(benefit);
+      policyBenefitsBySubGroup.set(key, existing);
+    });
+
+  logger.info('Catalogo de coberturas cargado', {
+    totalSubGroups: policyBenefitsBySubGroup.size,
+  });
 }
 
-function enrichCustomerRecordsWithPolicyCoverage() {
-  records = records.map((record) => ({
-    ...record,
-    policyCoverage: findPolicyCoverageForPolicyNumber(record.policyNumber),
-  }));
+function enrichCustomerRecordsWithPolicyData() {
+  records = records.map((record) => {
+    const policyParts = splitPolicyParts(record.policyNumber);
+    const policyCoverage = findPolicySummaryByPolicyParts(policyParts);
+    const policyBenefits = findPolicyBenefitsByPolicyParts(policyParts);
+
+    return {
+      ...record,
+      policyCoverage,
+      policyBenefits,
+    };
+  });
+
+  rebuildInsuredIndexes();
 }
 
-function findPolicyCoverageForPolicyNumber(policyNumber) {
-  const policyParts = String(policyNumber ?? '')
-    .split('|')
-    .map(normalizePolicyNumber)
-    .filter(Boolean);
+function rebuildInsuredIndexes() {
+  recordsByPolicyNumber = new Map();
+  recordsByNormalizedName = new Map();
 
+  for (const record of records) {
+    indexRecord(recordsByPolicyNumber, normalizePolicyNumber(record.policyNumber), record);
+    indexRecord(recordsByNormalizedName, normalizeName(record.fullName), record);
+  }
+}
+
+function findPolicySummaryByPolicyParts(policyParts) {
   for (const policyPart of policyParts) {
-    const coverage = policyCoveragesBySubGroup.get(policyPart);
+    const summary = policyCoveragesBySubGroup.get(normalizePolicyKey(policyPart));
 
-    if (coverage) {
-      return coverage;
+    if (summary) {
+      return summary;
     }
   }
 
   return null;
 }
 
-async function loadCsvFromSupabaseStorage(filePath) {
-  const supabase = createClient(env.supabaseUrl, env.supabaseStorageServiceKey, {
-    auth: { persistSession: false },
-  });
+function findPolicyBenefitsByPolicyParts(policyParts) {
+  for (const policyPart of policyParts) {
+    const benefits = policyBenefitsBySubGroup.get(normalizePolicyKey(policyPart));
 
-  const { data, error } = await supabase.storage
+    if (benefits?.length) {
+      return benefits;
+    }
+  }
+
+  return [];
+}
+
+async function loadTextFileFromSupabaseStorage(filePath, label) {
+  const { data, error } = await getStorageClient()
     .from(env.customerCsvBucket)
     .download(filePath);
 
   if (error) {
-    logger.warn('No se pudo descargar el CSV desde Supabase Storage', {
+    logger.warn(`No se pudo descargar ${label} desde Supabase Storage`, {
       bucket: env.customerCsvBucket,
       path: filePath,
       error: error.message,
@@ -213,7 +296,7 @@ async function loadCsvFromSupabaseStorage(filePath) {
     return null;
   }
 
-  logger.info('CSV descargado desde Supabase Storage', {
+  logger.info(`${capitalizeLabel(label)} descargado desde Supabase Storage`, {
     bucket: env.customerCsvBucket,
     path: filePath,
   });
@@ -221,17 +304,13 @@ async function loadCsvFromSupabaseStorage(filePath) {
   return await data.text();
 }
 
-async function loadSpreadsheetFromSupabaseStorage(filePath) {
-  const supabase = createClient(env.supabaseUrl, env.supabaseStorageServiceKey, {
-    auth: { persistSession: false },
-  });
-
-  const { data, error } = await supabase.storage
+async function loadBinaryFileFromSupabaseStorage(filePath, label) {
+  const { data, error } = await getStorageClient()
     .from(env.customerCsvBucket)
     .download(filePath);
 
   if (error) {
-    logger.warn('No se pudo descargar el archivo de coberturas desde Supabase Storage', {
+    logger.warn(`No se pudo descargar ${label} desde Supabase Storage`, {
       bucket: env.customerCsvBucket,
       path: filePath,
       error: error.message,
@@ -239,61 +318,51 @@ async function loadSpreadsheetFromSupabaseStorage(filePath) {
     return null;
   }
 
-  logger.info('Archivo de coberturas descargado desde Supabase Storage', {
+  logger.info(`${capitalizeLabel(label)} descargado desde Supabase Storage`, {
     bucket: env.customerCsvBucket,
     path: filePath,
   });
 
-  if (isXlsxPath(filePath)) {
-    const arrayBuffer = await data.arrayBuffer();
-    return workbookFirstSheetToCsv(Buffer.from(arrayBuffer));
-  }
-
-  return await data.text();
+  return Buffer.from(await data.arrayBuffer());
 }
 
-function resolveExistingLocalPolicyCoveragePath() {
-  if (fs.existsSync(policyCoverageXlsxPath)) {
-    return policyCoverageXlsxPath;
+function getStorageClient() {
+  const supabase = createClient(env.supabaseUrl, env.supabaseStorageServiceKey, {
+    auth: { persistSession: false },
+  });
+
+  return supabase.storage;
+}
+
+function capitalizeLabel(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function resolveExistingLocalPolicyWorkbookPath() {
+  if (fs.existsSync(policyWorkbookXlsxPath)) {
+    return policyWorkbookXlsxPath;
   }
 
-  if (fs.existsSync(policyCoverageCsvPath)) {
-    return policyCoverageCsvPath;
+  if (fs.existsSync(policyWorkbookCsvPath)) {
+    return policyWorkbookCsvPath;
   }
 
   return null;
-}
-
-function readSpreadsheetFromLocalFile(filePath) {
-  if (isXlsxPath(filePath)) {
-    return workbookFirstSheetToCsv(fs.readFileSync(filePath));
-  }
-
-  return fs.readFileSync(filePath, 'utf8');
-}
-
-function workbookFirstSheetToCsv(buffer) {
-  const workbook = XLSX.read(buffer, { type: 'buffer' });
-  const firstSheetName = workbook.SheetNames[0];
-
-  if (!firstSheetName) {
-    return '';
-  }
-
-  return XLSX.utils.sheet_to_csv(workbook.Sheets[firstSheetName], { blankrows: false });
 }
 
 function isXlsxPath(filePath) {
   return /\.xlsx$/i.test(filePath);
 }
 
-function shouldLoadFromSupabaseStorage() {
-  return Boolean(
-    env.supabaseUrl &&
-    env.supabaseStorageServiceKey &&
-    env.customerCsvBucket &&
-    env.customerCsvPath,
-  );
+function toNonEmptyLines(content) {
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function findHeaderLineIndex(lines, expectedHeader) {
+  return lines.findIndex((line) => parseCsvLine(line).includes(expectedHeader));
 }
 
 function parseCsvLine(line) {
@@ -327,7 +396,7 @@ function parseCsvLine(line) {
   return values.map((value) => value.trim());
 }
 
-function buildRecord(headers, values) {
+function buildInsuredRecord(headers, values) {
   if (headers.length !== values.length) {
     return null;
   }
@@ -342,6 +411,57 @@ function buildRecord(headers, values) {
     insurer: row.dGrupoAseguradora,
     relationship: row.Parentesco_Descriptivo,
     age: row.EDAD ? Number(row.EDAD) : null,
+    policyCoverage: null,
+    policyBenefits: [],
+  };
+}
+
+function buildPolicySummary(headers, values) {
+  if (headers.length !== values.length) {
+    return null;
+  }
+
+  const row = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']));
+
+  if (!row.SubGrupo) {
+    return null;
+  }
+
+  return {
+    policyId: row.Poliza_ID,
+    profile: row.Perfil,
+    branchNumber: row.No_Filial,
+    subGroup: row.SubGrupo,
+    plan: row.Plan,
+    medicalCircle: row.Circulo_Medico,
+    reimbursementMedicalCircle: row.Circulo_Medico_Reembolso,
+  };
+}
+
+function buildPolicyBenefit(headers, values) {
+  if (headers.length !== values.length) {
+    return null;
+  }
+
+  const row = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']));
+
+  if (!row.SubGrupo || !row.Cobertura) {
+    return null;
+  }
+
+  return {
+    policyId: row.Poliza_ID,
+    profile: row.Perfil,
+    branchNumber: row.No_Filial,
+    subGroup: row.SubGrupo,
+    plan: row.Plan,
+    coverage: row.Cobertura,
+    status: row.Estatus,
+    value: row.Valor,
+    unit: row.Unidad,
+    observations: row.Observaciones,
+    valueNumeric: row.Valor_Numerico,
+    isCoverage: row.Es_Cobertura,
   };
 }
 
@@ -355,10 +475,21 @@ function indexRecord(indexMap, key, record) {
   indexMap.set(key, existing);
 }
 
-function normalizePolicyNumber(value) {
+function splitPolicyParts(policyNumber) {
+  return String(policyNumber ?? '')
+    .split('|')
+    .map(normalizePolicyKey)
+    .filter(Boolean);
+}
+
+function normalizePolicyKey(value) {
   return String(value ?? '')
     .trim()
     .replace(/\s+/g, '');
+}
+
+function normalizePolicyNumber(value) {
+  return normalizePolicyKey(value);
 }
 
 function normalizeName(value) {

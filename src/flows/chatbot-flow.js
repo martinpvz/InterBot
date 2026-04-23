@@ -136,7 +136,7 @@ async function processIncomingText({ phoneNumber, userId, state, text }) {
       await sendButtons({
         to: phoneNumber,
         userId,
-        body: buildActionResponseBody(state, action.body),
+        body: buildActionResponseBody(state, normalizedText, action.body),
         footer: env.companyName,
         buttons: [
           { id: branchDefinition.backId, title: '↩️ Submenu' },
@@ -174,8 +174,9 @@ function resolveBranch(text, lowered) {
   return null;
 }
 
-function buildActionResponseBody(state, actionBody) {
+function buildActionResponseBody(state, actionId, actionBody) {
   const policyCoverage = state.customerProfile?.policyCoverage;
+  const policyBenefits = state.customerProfile?.policyBenefits ?? [];
   const coverageLines = policyCoverage
     ? [
         'Datos de tu poliza:',
@@ -187,12 +188,49 @@ function buildActionResponseBody(state, actionBody) {
       ]
     : [];
 
+  const detailedCoverageBody = actionId === 'gmm_coberturas'
+    ? buildDetailedCoverageBody(policyBenefits)
+    : '';
+
   return [
     ...coverageLines,
-    actionBody,
+    ...(detailedCoverageBody ? [detailedCoverageBody] : [actionBody]),
     '',
     `_Ramo: ${state.ramaLabel}_`,
   ].join('\n');
+}
+
+function buildDetailedCoverageBody(policyBenefits) {
+  if (!Array.isArray(policyBenefits) || policyBenefits.length === 0) {
+    return '';
+  }
+
+  const formattedLines = policyBenefits.map((benefit) => {
+    const detailParts = [
+      benefit.status,
+      formatBenefitValue(benefit.value, benefit.unit),
+      benefit.observations,
+    ].filter(Boolean);
+
+    return `- ${benefit.coverage}: ${detailParts.join(' | ') || 'Sin detalle disponible'}`;
+  });
+
+  return [
+    '📋 *Coberturas GMM*',
+    '',
+    ...formattedLines,
+  ].join('\n');
+}
+
+function formatBenefitValue(value, unit) {
+  const cleanValue = String(value ?? '').trim();
+  const cleanUnit = String(unit ?? '').trim();
+
+  if (!cleanValue) {
+    return '';
+  }
+
+  return cleanUnit ? `${cleanValue} ${cleanUnit}` : cleanValue;
 }
 
 async function showBranchMenu({ phoneNumber, userId, branchKey }) {
@@ -398,21 +436,10 @@ async function finalizeCustomerIdentification({ phoneNumber, userId, state, cust
   state.identificationStep = null;
   state.identificationContext = null;
 
-  const coverageLines = state.customerProfile.policyCoverage
-    ? [
-        `Perfil: ${state.customerProfile.policyCoverage.profile}`,
-        `Plan: ${state.customerProfile.policyCoverage.plan}`,
-        `Circulo medico: ${state.customerProfile.policyCoverage.medicalCircle}`,
-      ]
-    : [];
-
   await sendText({
     to: phoneNumber,
     userId,
-    text: [
-      `Gracias, ${state.customerProfile.firstName}. Ya encontre tu registro con la aseguradora ${state.customerProfile.insurer}.`,
-      ...(coverageLines.length > 0 ? ['', 'Tambien encontre estos datos de tu poliza:', ...coverageLines] : []),
-    ].join('\n'),
+    text: `Gracias, ${state.customerProfile.firstName}. Ya encontre tu registro con la aseguradora ${state.customerProfile.insurer}.`,
   });
 
   return processIncomingText({ phoneNumber, userId, state, text: 'inicio' });
