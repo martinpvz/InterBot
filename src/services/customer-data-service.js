@@ -97,12 +97,34 @@ function refineCustomerMatchesByRelationship(matches, relationshipInput) {
 }
 
 function normalizeRelationship(value) {
-  return String(value ?? '')
+  const normalizedValue = String(value ?? '')
     .trim()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .toUpperCase();
+
+  const aliases = new Map([
+    ['HIJO', 'HIJO(A)'],
+    ['HIJA', 'HIJO(A)'],
+    ['HIJO(A)', 'HIJO(A)'],
+    ['CONYUGE', 'CONYUGE'],
+    ['CONYUGUE', 'CONYUGE'],
+    ['ESPOSA', 'CONYUGE'],
+    ['ESPOSO', 'CONYUGE'],
+    ['TITULAR', 'TITULAR'],
+  ]);
+
+  return aliases.get(normalizedValue) ?? normalizedValue;
+}
+
+function looksLikeRelationshipInput(value) {
+  return ['TITULAR', 'CONYUGE', 'HIJO(A)'].includes(normalizeRelationship(value));
+}
+
+function looksLikeFreshLookupInput(value) {
+  const trimmedValue = String(value ?? '').trim();
+  return trimmedValue.length >= 3 && (looksLikePolicyNumber(trimmedValue) || /[A-Za-zÁÉÍÓÚáéíóúÑñ]/.test(trimmedValue));
 }
 
 function extractFirstName(fullName) {
@@ -115,6 +137,8 @@ export {
   findCustomerMatch,
   formatCustomerProfile,
   getCustomerCatalogStats,
+  looksLikeFreshLookupInput,
+  looksLikeRelationshipInput,
   refineCustomerMatchesByAge,
   refineCustomerMatchesByRelationship,
 };

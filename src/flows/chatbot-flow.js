@@ -3,6 +3,8 @@ import {
   findCustomerMatch,
   formatCustomerProfile,
   getCustomerCatalogStats,
+  looksLikeFreshLookupInput,
+  looksLikeRelationshipInput,
   refineCustomerMatchesByAge,
   refineCustomerMatchesByRelationship,
 } from '../services/customer-data-service.js';
@@ -25,6 +27,12 @@ function resetCustomerIdentity(state) {
   state.customerProfile = null;
 }
 
+function prepareIdentificationRestart(state) {
+  state.identificationAttempted = true;
+  state.identificationStep = 'awaiting_lookup';
+  state.identificationContext = null;
+}
+
 async function processIncomingText({ phoneNumber, userId, state, text }) {
   const normalizedText = text.trim();
   const lowered = normalizedText.toLowerCase();
@@ -36,6 +44,7 @@ async function processIncomingText({ phoneNumber, userId, state, text }) {
   ) {
     resetSession(state);
     resetCustomerIdentity(state);
+    prepareIdentificationRestart(state);
     await sendText({
       to: phoneNumber,
       userId,
@@ -202,9 +211,8 @@ async function identifyCustomer({ phoneNumber, userId, state, text }) {
   }
 
   if (!state.identificationAttempted) {
-    state.identificationAttempted = true;
+    prepareIdentificationRestart(state);
     state.paso = 'identificar_cliente';
-    state.identificationStep = 'awaiting_lookup';
 
     await sendText({
       to: phoneNumber,
@@ -261,6 +269,11 @@ async function identifyCustomer({ phoneNumber, userId, state, text }) {
 }
 
 async function continueCustomerIdentificationByAge({ phoneNumber, userId, state, text }) {
+  if (looksLikeFreshLookupInput(text) && !/^\d+$/.test(String(text).trim())) {
+    prepareIdentificationRestart(state);
+    return identifyCustomer({ phoneNumber, userId, state, text });
+  }
+
   const pendingMatches = state.identificationContext?.pendingMatches ?? [];
   const result = refineCustomerMatchesByAge(pendingMatches, text);
 
@@ -310,6 +323,11 @@ async function continueCustomerIdentificationByAge({ phoneNumber, userId, state,
 }
 
 async function continueCustomerIdentificationByRelationship({ phoneNumber, userId, state, text }) {
+  if (looksLikeFreshLookupInput(text) && !looksLikeRelationshipInput(text)) {
+    prepareIdentificationRestart(state);
+    return identifyCustomer({ phoneNumber, userId, state, text });
+  }
+
   const pendingMatches = state.identificationContext?.pendingMatches ?? [];
   const result = refineCustomerMatchesByRelationship(pendingMatches, text);
 
