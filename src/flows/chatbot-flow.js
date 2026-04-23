@@ -8,6 +8,11 @@ import {
   refineCustomerMatchesByAge,
   refineCustomerMatchesByRelationship,
 } from '../services/customer-data-service.js';
+import {
+  extractAgeInput,
+  extractLookupInput,
+  extractRelationshipInput,
+} from '../services/input-normalizer.js';
 import { assignAdvisor } from '../services/advisor-service.js';
 import { sendButtons, sendList, sendText } from '../services/whatsapp-service.js';
 
@@ -231,7 +236,8 @@ async function identifyCustomer({ phoneNumber, userId, state, text }) {
     return continueCustomerIdentificationByRelationship({ phoneNumber, userId, state, text });
   }
 
-  const lookupResult = findCustomerMatch(text);
+  const lookupInput = extractLookupInput(text);
+  const lookupResult = findCustomerMatch(lookupInput);
 
   if (lookupResult.matches.length === 1) {
     return finalizeCustomerIdentification({
@@ -269,13 +275,15 @@ async function identifyCustomer({ phoneNumber, userId, state, text }) {
 }
 
 async function continueCustomerIdentificationByAge({ phoneNumber, userId, state, text }) {
-  if (looksLikeFreshLookupInput(text) && !/^\d+$/.test(String(text).trim())) {
+  const ageInput = extractAgeInput(text);
+
+  if (looksLikeFreshLookupInput(text) && !/^\d+$/.test(String(ageInput).trim())) {
     prepareIdentificationRestart(state);
     return identifyCustomer({ phoneNumber, userId, state, text });
   }
 
   const pendingMatches = state.identificationContext?.pendingMatches ?? [];
-  const result = refineCustomerMatchesByAge(pendingMatches, text);
+  const result = refineCustomerMatchesByAge(pendingMatches, ageInput);
 
   if (!result.valid) {
     await sendText({
@@ -323,13 +331,15 @@ async function continueCustomerIdentificationByAge({ phoneNumber, userId, state,
 }
 
 async function continueCustomerIdentificationByRelationship({ phoneNumber, userId, state, text }) {
-  if (looksLikeFreshLookupInput(text) && !looksLikeRelationshipInput(text)) {
+  const relationshipInput = extractRelationshipInput(text);
+
+  if (looksLikeFreshLookupInput(text) && !looksLikeRelationshipInput(relationshipInput)) {
     prepareIdentificationRestart(state);
     return identifyCustomer({ phoneNumber, userId, state, text });
   }
 
   const pendingMatches = state.identificationContext?.pendingMatches ?? [];
-  const result = refineCustomerMatchesByRelationship(pendingMatches, text);
+  const result = refineCustomerMatchesByRelationship(pendingMatches, relationshipInput);
 
   if (!result.valid) {
     await sendText({
