@@ -246,6 +246,11 @@ function enrichCustomerRecordsWithPolicyData() {
   });
 
   rebuildInsuredIndexes();
+
+  logger.info('Enriquecimiento de polizas aplicado', {
+    recordsWithPolicyCoverage: records.filter((record) => Boolean(record.policyCoverage)).length,
+    recordsWithPolicyBenefits: records.filter((record) => Array.isArray(record.policyBenefits) && record.policyBenefits.length > 0).length,
+  });
 }
 
 function rebuildInsuredIndexes() {
@@ -332,6 +337,14 @@ function getStorageClient() {
   });
 
   return supabase.storage;
+}
+
+function shouldLoadFromSupabaseStorage() {
+  return Boolean(
+    env.supabaseUrl &&
+    env.supabaseStorageServiceKey &&
+    env.customerCsvBucket,
+  );
 }
 
 function capitalizeLabel(value) {
