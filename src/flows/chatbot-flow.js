@@ -136,7 +136,7 @@ async function processIncomingText({ phoneNumber, userId, state, text }) {
       await sendButtons({
         to: phoneNumber,
         userId,
-        body: `${action.body}\n\n_Ramo: ${state.ramaLabel}_`,
+        body: buildActionResponseBody(state, action.body),
         footer: env.companyName,
         buttons: [
           { id: branchDefinition.backId, title: '↩️ Submenu' },
@@ -172,6 +172,27 @@ function resolveBranch(text, lowered) {
   }
 
   return null;
+}
+
+function buildActionResponseBody(state, actionBody) {
+  const policyCoverage = state.customerProfile?.policyCoverage;
+  const coverageLines = policyCoverage
+    ? [
+        'Datos de tu poliza:',
+        `Perfil: ${policyCoverage.profile}`,
+        `Plan: ${policyCoverage.plan}`,
+        `Circulo medico: ${policyCoverage.medicalCircle}`,
+        `Circulo medico reembolso: ${policyCoverage.reimbursementMedicalCircle}`,
+        '',
+      ]
+    : [];
+
+  return [
+    ...coverageLines,
+    actionBody,
+    '',
+    `_Ramo: ${state.ramaLabel}_`,
+  ].join('\n');
 }
 
 async function showBranchMenu({ phoneNumber, userId, branchKey }) {
@@ -377,10 +398,21 @@ async function finalizeCustomerIdentification({ phoneNumber, userId, state, cust
   state.identificationStep = null;
   state.identificationContext = null;
 
+  const coverageLines = state.customerProfile.policyCoverage
+    ? [
+        `Perfil: ${state.customerProfile.policyCoverage.profile}`,
+        `Plan: ${state.customerProfile.policyCoverage.plan}`,
+        `Circulo medico: ${state.customerProfile.policyCoverage.medicalCircle}`,
+      ]
+    : [];
+
   await sendText({
     to: phoneNumber,
     userId,
-    text: `Gracias, ${state.customerProfile.firstName}. Ya encontre tu registro con la aseguradora ${state.customerProfile.insurer}.`,
+    text: [
+      `Gracias, ${state.customerProfile.firstName}. Ya encontre tu registro con la aseguradora ${state.customerProfile.insurer}.`,
+      ...(coverageLines.length > 0 ? ['', 'Tambien encontre estos datos de tu poliza:', ...coverageLines] : []),
+    ].join('\n'),
   });
 
   return processIncomingText({ phoneNumber, userId, state, text: 'inicio' });
