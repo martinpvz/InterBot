@@ -318,7 +318,7 @@ async function identifyCustomer({ phoneNumber, userId, state, text }) {
     await sendText({
       to: phoneNumber,
       userId,
-      text: 'Encontre varias coincidencias con ese dato. Para ubicarte sin mostrar informacion sensible, comparte tu edad en numero.',
+      text: 'Encontre varias coincidencias con ese dato. Para ubicarte sin mostrar informacion sensible, comparte tu edad, tu ano de nacimiento o tu fecha de nacimiento.',
     });
 
     return state;
@@ -348,7 +348,7 @@ async function continueCustomerIdentificationByAge({ phoneNumber, userId, state,
     await sendText({
       to: phoneNumber,
       userId,
-      text: 'Necesito tu edad en numero para continuar. Por ejemplo: 36.',
+      text: 'Necesito tu edad, tu ano de nacimiento o tu fecha de nacimiento para continuar. Por ejemplo: 36, 1990 o 01/01/1990.',
     });
     return state;
   }
