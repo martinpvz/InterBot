@@ -33,6 +33,9 @@ const env = {
   customerCsvBucket: optional('CUSTOMER_CSV_BUCKET'),
   customerCsvPath: optional('CUSTOMER_CSV_PATH', 'asegurados.csv'),
   policyCoverageCsvPath: optional('POLICY_COVERAGE_CSV_PATH', 'base_polizas_cobertura.xlsx'),
+  geminiApiKey: optional('GEMINI_API_KEY'),
+  geminiModel: optional('GEMINI_MODEL', 'gemini-2.5-flash'),
+  aiIntentRoutingEnabled: optional('AI_INTENT_ROUTING_ENABLED', 'true') !== 'false',
 };
 
 if (Number.isNaN(env.port)) {

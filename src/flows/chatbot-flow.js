@@ -14,15 +14,22 @@ import {
   extractRelationshipInput,
 } from '../services/input-normalizer.js';
 import { assignAdvisor } from '../services/advisor-service.js';
+import { routeConsultationIntent } from '../services/consultation-router-service.js';
 import { sendButtons, sendList, sendText } from '../services/whatsapp-service.js';
 
-import { menuDefinitions, ramoMenu } from './menu-definitions.js';
+import { ramoMenu } from './branch-menu-definitions.js';
+import {
+  CONSULTATION_INTENTS,
+  consultationActions,
+  consultationMenuSections,
+} from './consultation-menu-definitions.js';
 
 function resetSession(state) {
   state.rama = null;
   state.paso = 'inicio';
   state.ramaLabel = '';
   state.pasoLabel = '';
+  state.consultaIntent = null;
 }
 
 function resetCustomerIdentity(state) {
@@ -53,7 +60,7 @@ async function processIncomingText({ phoneNumber, userId, state, text }) {
     await sendText({
       to: phoneNumber,
       userId,
-      text: 'Entendido. Vamos a reiniciar tu identificacion. Comparte tu numero de poliza o tu nombre completo.',
+      text: 'Entendido. Vamos a reiniciar tu identificación. Comparte tu número de póliza o tu nombre completo.',
     });
     return state;
   }
@@ -61,6 +68,7 @@ async function processIncomingText({ phoneNumber, userId, state, text }) {
   if (
     normalizedText === 'asesor' ||
     lowered === '0' ||
+    (state.customerProfile && state.paso === 'consulta_abierta' && lowered === '8') ||
     lowered.includes('asesor') ||
     lowered.includes('humano') ||
     lowered.includes('persona')
@@ -83,18 +91,7 @@ async function processIncomingText({ phoneNumber, userId, state, text }) {
   }
 
   if (state.paso === 'inicio') {
-    state.paso = 'elegir_rama';
-
-    await sendList({
-      to: phoneNumber,
-      userId,
-      header: `Bienvenido a ${env.companyName}`,
-      body: `Hola ${state.customerProfile.firstName}, sobre que ramo es tu consulta?`,
-      footer: 'Escribe 0 en cualquier momento para hablar con un asesor',
-      sections: ramoMenu,
-    });
-
-    return state;
+    return showBranchSelection({ phoneNumber, userId, state });
   }
 
   if (state.paso === 'elegir_rama') {
@@ -104,122 +101,248 @@ async function processIncomingText({ phoneNumber, userId, state, text }) {
       await sendText({
         to: phoneNumber,
         userId,
-        text: 'Por favor selecciona una opcion del menu. Escribe menu para verlo de nuevo.',
+        text: 'Por favor selecciona GMM, Accidentes Personales o Vida para continuar.',
       });
       return state;
     }
 
-    const branchDefinition = menuDefinitions[selectedBranch];
-    state.rama = selectedBranch;
-    state.paso = branchDefinition.menuKey;
-    state.ramaLabel = branchDefinition.ramaLabel;
-    state.pasoLabel = '';
-
-    await showBranchMenu({ phoneNumber, userId, branchKey: selectedBranch });
+    setSelectedBranch(state, selectedBranch);
+    await showConsultationPrompt({ phoneNumber, userId, state });
     return state;
   }
 
-  if (state.rama && menuDefinitions[state.rama] && state.paso === menuDefinitions[state.rama].menuKey) {
-    const branchDefinition = menuDefinitions[state.rama];
-
-    if (normalizedText === branchDefinition.backId) {
-      state.pasoLabel = '';
-      await showBranchMenu({ phoneNumber, userId, branchKey: state.rama });
-      return state;
-    }
-
-    const action = branchDefinition.actions[normalizedText];
-
-    if (action) {
-      state.pasoLabel = action.pasoLabel;
-
-      await sendButtons({
-        to: phoneNumber,
-        userId,
-        body: buildActionResponseBody(state, normalizedText, action.body),
-        footer: env.companyName,
-        buttons: [
-          { id: branchDefinition.backId, title: '↩️ Submenu' },
-          { id: 'menu_principal', title: '🏠 Inicio' },
-          { id: 'asesor', title: '👤 Asesor' },
-        ],
-      });
-
-      return state;
-    }
-
-    if (normalizedText === 'menu_principal') {
-      resetSession(state);
-      return processIncomingText({ phoneNumber, userId, state, text: 'inicio' });
-    }
+  if (state.paso === 'consulta_abierta') {
+    return routeOpenConsultation({ phoneNumber, userId, state, text: normalizedText });
   }
 
   resetSession(state);
   return processIncomingText({ phoneNumber, userId, state, text: 'inicio' });
 }
 
+async function showBranchSelection({ phoneNumber, userId, state }) {
+  state.paso = 'elegir_rama';
+
+  await sendList({
+    to: phoneNumber,
+    userId,
+    header: `Bienvenido a ${env.companyName}`,
+    body: `Hola ${state.customerProfile.firstName}, ¿sobre qué ramo es tu consulta?`,
+    footer: 'Escribe 0 en cualquier momento para hablar con un asesor',
+    sections: ramoMenu,
+  });
+
+  return state;
+}
+
+function setSelectedBranch(state, selectedBranch) {
+  const branchLabels = {
+    gmm: 'Gastos Médicos Mayores (GMM)',
+    ap: 'Accidentes Personales (AP)',
+    vida: 'Seguro de Vida',
+  };
+
+  state.rama = selectedBranch;
+  state.ramaLabel = branchLabels[selectedBranch];
+  state.paso = 'consulta_abierta';
+  state.pasoLabel = '';
+  state.consultaIntent = null;
+}
+
+async function showConsultationPrompt({ phoneNumber, userId, state }) {
+  await sendList({
+    to: phoneNumber,
+    userId,
+    header: state.ramaLabel,
+    body: '¿Cuál es tu consulta? Puedes escribirla con tus palabras o elegir una opción.',
+    footer: 'Gemini me ayuda a canalizar tu solicitud',
+    sections: consultationMenuSections,
+  });
+}
+
+async function routeOpenConsultation({ phoneNumber, userId, state, text }) {
+  const routing = await routeConsultationIntent({
+    text,
+    branchLabel: state.ramaLabel,
+  });
+
+  if (!routing.intent) {
+    await sendList({
+      to: phoneNumber,
+      userId,
+      header: state.ramaLabel,
+      body: 'No estoy seguro de haber entendido tu consulta. Puedes escribirla de otra forma o elegir una opción.',
+      footer: 'Escribe 8 para hablar con un asesor',
+      sections: consultationMenuSections,
+    });
+    return state;
+  }
+
+  state.consultaIntent = routing.intent;
+
+  if (routing.intent === CONSULTATION_INTENTS.ADVISOR) {
+    await handoffToAdvisor({ phoneNumber, userId, state });
+    return state;
+  }
+
+  if (routing.intent === CONSULTATION_INTENTS.PREVIOUS_MENU) {
+    state.rama = null;
+    state.ramaLabel = '';
+    state.pasoLabel = '';
+    state.consultaIntent = null;
+    return showBranchSelection({ phoneNumber, userId, state });
+  }
+
+  const action = consultationActions[routing.intent];
+  state.pasoLabel = action.pasoLabel;
+
+  await sendButtons({
+    to: phoneNumber,
+    userId,
+    body: buildConsultationResponseBody(state, routing.intent),
+    footer: `Ramo: ${state.ramaLabel}`,
+    buttons: [
+      { id: CONSULTATION_INTENTS.PREVIOUS_MENU, title: '🔙 Ramo' },
+      { id: 'menu_principal', title: '🏠 Inicio' },
+      { id: CONSULTATION_INTENTS.ADVISOR, title: '👤 Asesor' },
+    ],
+  });
+
+  return state;
+}
+
 function resolveBranch(text, lowered) {
-  if (text === 'gmm' || lowered.includes('gmm') || lowered.includes('gastos')) {
+  if (text === 'gmm' || text === '1' || lowered.includes('gmm') || lowered.includes('gastos')) {
     return 'gmm';
   }
 
-  if (text === 'ap' || lowered.includes('accidente')) {
+  if (text === 'ap' || text === '2' || lowered.includes('accidente')) {
     return 'ap';
   }
 
-  if (text === 'vida' || lowered.includes('vida')) {
+  if (text === 'vida' || text === '3' || lowered.includes('vida')) {
     return 'vida';
   }
 
   return null;
 }
 
-function buildActionResponseBody(state, actionId, actionBody) {
-  const policyCoverage = state.customerProfile?.policyCoverage;
-  const policyBenefits = state.customerProfile?.policyBenefits ?? [];
-  const coverageLines = policyCoverage
-    ? [
-        'Datos de tu poliza:',
-        `Perfil: ${policyCoverage.profile}`,
-        `Plan: ${policyCoverage.plan}`,
-        `Circulo medico: ${policyCoverage.medicalCircle}`,
-        `Circulo medico reembolso: ${policyCoverage.reimbursementMedicalCircle}`,
-        '',
-      ]
-    : [];
-
-  const detailedCoverageBody = actionId === 'gmm_coberturas'
-    ? buildDetailedCoverageBody(policyBenefits)
-    : '';
+function buildConsultationResponseBody(state, intent) {
+  const action = consultationActions[intent];
+  const bodyByIntent = {
+    [CONSULTATION_INTENTS.POLICY_INFO]: buildPolicyInformationBody(state),
+    [CONSULTATION_INTENTS.MEDICAL_URGENCY]: buildMedicalUrgencyBody(state),
+    [CONSULTATION_INTENTS.CLAIM_STATUS]: buildClaimStatusBody(),
+    [CONSULTATION_INTENTS.CLAIM_DOCUMENTS]: buildClaimDocumentsBody(state),
+    [CONSULTATION_INTENTS.HOSPITAL_ENTRY_EXIT]: buildHospitalEntryExitBody(state),
+    [CONSULTATION_INTENTS.START_CLAIM]: buildStartClaimBody(state),
+  };
 
   return [
-    ...coverageLines,
-    ...(detailedCoverageBody ? [detailedCoverageBody] : [actionBody]),
+    `*${action.label}*`,
     '',
-    `_Ramo: ${state.ramaLabel}_`,
+    bodyByIntent[intent] ?? 'Estoy revisando tu consulta.',
+    '',
+    'Puedes escribir otra consulta o usar los botones de abajo.',
   ].join('\n');
 }
 
-function buildDetailedCoverageBody(policyBenefits) {
-  if (!Array.isArray(policyBenefits) || policyBenefits.length === 0) {
-    return '';
+function buildPolicyInformationBody(state) {
+  const profile = state.customerProfile;
+  const policyCoverage = profile?.policyCoverage;
+  const benefits = profile?.policyBenefits ?? [];
+  const lines = [
+    `Aseguradora: ${profile?.insurer || 'No disponible'}`,
+    `Póliza: ${profile?.policyNumber || 'No disponible'}`,
+    `Parentesco: ${profile?.relationship || 'No disponible'}`,
+  ];
+
+  if (policyCoverage) {
+    lines.push(
+      '',
+      'Datos de tu póliza:',
+      `Perfil: ${policyCoverage.profile}`,
+      `Plan: ${policyCoverage.plan}`,
+      `Subgrupo: ${policyCoverage.subGroup}`,
+      `No. filial: ${policyCoverage.branchNumber}`,
+      `Círculo médico: ${policyCoverage.medicalCircle}`,
+      `Círculo médico reembolso: ${policyCoverage.reimbursementMedicalCircle}`,
+    );
   }
 
-  const formattedLines = policyBenefits.map((benefit) => {
-    const detailParts = [
-      benefit.status,
-      formatBenefitValue(benefit.value, benefit.unit),
-      benefit.observations,
-    ].filter(Boolean);
+  if (benefits.length > 0) {
+    lines.push('', 'Coberturas principales:');
+    lines.push(...benefits.slice(0, 8).map((benefit) => `- ${formatBenefitLine(benefit)}`));
 
-    return `- ${benefit.coverage}: ${detailParts.join(' | ') || 'Sin detalle disponible'}`;
-  });
+    if (benefits.length > 8) {
+      lines.push(`- Y ${benefits.length - 8} cobertura(s) adicional(es).`);
+    }
+  }
 
+  return lines.join('\n');
+}
+
+function buildMedicalUrgencyBody(state) {
   return [
-    '📋 *Coberturas GMM*',
+    'Si es una emergencia que pone en riesgo tu vida, llama primero al 911.',
     '',
-    ...formattedLines,
+    'Para atención médica, ten a la mano:',
+    '- Número de póliza',
+    '- Identificación oficial',
+    '- Nombre del hospital o médico',
+    '- Motivo de la atención',
+    '',
+    `Ramo seleccionado: ${state.ramaLabel}.`,
+    'Si necesitas apoyo inmediato, elige Asesor.',
   ].join('\n');
+}
+
+function buildClaimStatusBody() {
+  return [
+    'Para revisar el estatus necesitamos el número de caso, siniestro o reclamación.',
+    '',
+    'Si no lo tienes a la mano, un asesor puede ayudarte a ubicarlo con tus datos de póliza.',
+  ].join('\n');
+}
+
+function buildClaimDocumentsBody(state) {
+  return [
+    `Para ${state.ramaLabel}, normalmente se solicitan documentos de identificación, póliza, comprobantes y formatos de la aseguradora.`,
+    '',
+    'Como los requisitos pueden cambiar según el tipo de caso, te puedo canalizar con un asesor para confirmar la lista exacta.',
+  ].join('\n');
+}
+
+function buildHospitalEntryExitBody(state) {
+  return [
+    `Para entrada o salida del hospital en ${state.ramaLabel}, considera tener listos:`,
+    '- Identificación oficial',
+    '- Datos de póliza',
+    '- Informe médico o diagnóstico',
+    '- Hospital y médico tratante',
+    '- Autorizaciones o cartas de la aseguradora, si aplican',
+    '',
+    'Antes de firmar o pagar, conviene validar cobertura y proceso con asesoría.',
+  ].join('\n');
+}
+
+function buildStartClaimBody(state) {
+  return [
+    `Para iniciar un trámite de siniestro en ${state.ramaLabel}:`,
+    '1. Reúne datos de póliza y asegurado.',
+    '2. Ten documentos médicos o soporte del caso.',
+    '3. Conserva facturas, recibos y reportes originales.',
+    '4. Contacta a un asesor para validar el proceso correcto con la aseguradora.',
+  ].join('\n');
+}
+
+function formatBenefitLine(benefit) {
+  const detailParts = [
+    benefit.status,
+    formatBenefitValue(benefit.value, benefit.unit),
+    benefit.observations,
+  ].filter(Boolean);
+
+  return `${benefit.coverage}: ${detailParts.join(' | ') || 'Sin detalle disponible'}`;
 }
 
 function formatBenefitValue(value, unit) {
@@ -233,19 +356,6 @@ function formatBenefitValue(value, unit) {
   return cleanUnit ? `${cleanValue} ${cleanUnit}` : cleanValue;
 }
 
-async function showBranchMenu({ phoneNumber, userId, branchKey }) {
-  const branch = menuDefinitions[branchKey];
-
-  await sendList({
-    to: phoneNumber,
-    userId,
-    header: branch.header,
-    body: branch.body,
-    footer: branch.footer,
-    sections: branch.sections,
-  });
-}
-
 async function handoffToAdvisor({ phoneNumber, userId, state }) {
   const assignment = await assignAdvisor({
     userId,
@@ -257,7 +367,7 @@ async function handoffToAdvisor({ phoneNumber, userId, state }) {
   await sendText({
     to: phoneNumber,
     userId,
-    text: `*Te conectamos con un asesor de ${env.companyName}*\n\nToca el enlace para iniciar la conversacion:\n${assignment.waLink}\n\nHorario de mensajes: Lun-Dom 7:30am - 3:00pm\nLlamadas: 24/7`,
+    text: `*Te conectamos con un asesor de ${env.companyName}*\n\nToca el enlace para iniciar la conversación:\n${assignment.waLink}\n\nHorario de mensajes: Lun-Dom 7:30am - 3:00pm\nLlamadas: 24/7`,
   });
 }
 
@@ -269,7 +379,7 @@ async function identifyCustomer({ phoneNumber, userId, state, text }) {
     await sendText({
       to: phoneNumber,
       userId,
-      text: 'En este momento no tengo acceso al catalogo de asegurados. Escribe 0 para hablar con un asesor.',
+      text: 'En este momento no tengo acceso al catálogo de asegurados. Escribe 0 para hablar con un asesor.',
     });
     return state;
   }
@@ -281,7 +391,7 @@ async function identifyCustomer({ phoneNumber, userId, state, text }) {
     await sendText({
       to: phoneNumber,
       userId,
-      text: `Hola, soy el asistente de ${env.companyName}. Para ubicar tu informacion, comparte tu numero de poliza o tu nombre completo.`,
+      text: '👋 Hola, soy el asistente de Inter.\n\nPara ubicar tu información, comparte tu número de póliza o nombre completo.',
     });
 
     return state;
@@ -318,7 +428,7 @@ async function identifyCustomer({ phoneNumber, userId, state, text }) {
     await sendText({
       to: phoneNumber,
       userId,
-      text: 'Encontre varias coincidencias con ese dato. Para ubicarte sin mostrar informacion sensible, comparte tu edad, tu año de nacimiento o tu fecha de nacimiento.',
+      text: 'Encontré varias coincidencias con ese dato. Para ubicarte sin mostrar información sensible, comparte tu edad, tu año de nacimiento o tu fecha de nacimiento.',
     });
 
     return state;
@@ -327,7 +437,7 @@ async function identifyCustomer({ phoneNumber, userId, state, text }) {
   await sendText({
     to: phoneNumber,
     userId,
-    text: 'No encontre coincidencias con ese dato. Intenta con tu numero de poliza completo o tu nombre completo como aparece en la poliza.',
+    text: 'No encontré coincidencias con ese dato. Intenta con tu número de póliza completo o tu nombre completo como aparece en la póliza.',
   });
 
   return state;
@@ -372,7 +482,7 @@ async function continueCustomerIdentificationByAge({ phoneNumber, userId, state,
     await sendText({
       to: phoneNumber,
       userId,
-      text: 'Gracias. Todavia necesito un dato adicional para ubicarte mejor. Comparte tu parentesco en la poliza, por ejemplo: TITULAR, CONYUGE o HIJO(A).',
+      text: 'Gracias. Todavía necesito un dato adicional para ubicarte mejor. Comparte tu parentesco en la póliza, por ejemplo: TITULAR, CÓNYUGE o HIJO(A).',
     });
     return state;
   }
@@ -383,7 +493,7 @@ async function continueCustomerIdentificationByAge({ phoneNumber, userId, state,
   await sendText({
     to: phoneNumber,
     userId,
-    text: 'Con esa edad no encontre una coincidencia unica. Intenta con tu numero de poliza completo o con tu nombre completo como aparece en la poliza.',
+    text: 'Con esa edad no encontré una coincidencia única. Intenta con tu número de póliza completo o con tu nombre completo como aparece en la póliza.',
   });
 
   return state;
@@ -404,7 +514,7 @@ async function continueCustomerIdentificationByRelationship({ phoneNumber, userI
     await sendText({
       to: phoneNumber,
       userId,
-      text: 'Necesito tu parentesco tal como aparece en la poliza. Por ejemplo: TITULAR, CONYUGE o HIJO(A).',
+      text: 'Necesito tu parentesco tal como aparece en la póliza. Por ejemplo: TITULAR, CÓNYUGE o HIJO(A).',
     });
     return state;
   }
@@ -424,7 +534,7 @@ async function continueCustomerIdentificationByRelationship({ phoneNumber, userI
   await sendText({
     to: phoneNumber,
     userId,
-    text: 'Aun no pude ubicar un registro unico con esos datos. Intenta con tu numero de poliza completo o escribe 0 para hablar con un asesor.',
+    text: 'Aún no pude ubicar un registro único con esos datos. Intenta con tu número de póliza completo o escribe 0 para hablar con un asesor.',
   });
 
   return state;
@@ -439,7 +549,7 @@ async function finalizeCustomerIdentification({ phoneNumber, userId, state, cust
   await sendText({
     to: phoneNumber,
     userId,
-    text: `Gracias, ${state.customerProfile.firstName}. Ya encontre tu registro con la aseguradora ${state.customerProfile.insurer}.`,
+    text: `✅ Gracias, ${state.customerProfile.firstName}.\n\nYa encontré tu registro con la aseguradora ${state.customerProfile.insurer}.`,
   });
 
   return processIncomingText({ phoneNumber, userId, state, text: 'inicio' });
