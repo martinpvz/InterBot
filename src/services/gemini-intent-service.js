@@ -84,23 +84,19 @@ function buildGeminiRequest({ text, branchLabel }) {
     generationConfig: {
       temperature: 0,
       maxOutputTokens: 120,
-      responseFormat: {
-        text: {
-          mimeType: 'application/json',
-          schema: {
-            type: 'object',
-            properties: {
-              intent: {
-                type: 'string',
-                enum: Object.values(CONSULTATION_INTENTS),
-              },
-              confidence: {
-                type: 'number',
-              },
-            },
-            required: ['intent', 'confidence'],
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          intent: {
+            type: 'STRING',
+            enum: Object.values(CONSULTATION_INTENTS),
+          },
+          confidence: {
+            type: 'NUMBER',
           },
         },
+        required: ['intent', 'confidence'],
       },
     },
   };
