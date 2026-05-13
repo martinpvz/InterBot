@@ -87,16 +87,32 @@ function classifyIntentLocally(text) {
     return buildLocalResult(CONSULTATION_INTENTS.MEDICAL_URGENCY, HIGH_CONFIDENCE);
   }
 
-  if (hasAny(normalizedText, ['estatus', 'estado', 'seguimiento', 'avance', 'como va', 'reclamacion', 'caso'])) {
+  if (
+    hasAny(normalizedText, ['iniciar', 'abrir', 'levantar', 'comenzar']) &&
+    hasAny(normalizedText, ['tramite', 'siniestro', 'reclamacion', 'reembolso'])
+  ) {
+    return buildLocalResult(CONSULTATION_INTENTS.START_CLAIM, HIGH_CONFIDENCE);
+  }
+
+  if (hasAny(normalizedText, [
+    'estatus',
+    'estado',
+    'seguimiento',
+    'avance',
+    'como va',
+    'reclamacion',
+    'caso',
+    'reporte',
+    'informe',
+    'constancia',
+    'comprobante',
+    'siniestro',
+  ])) {
     return buildLocalResult(CONSULTATION_INTENTS.CLAIM_STATUS, HIGH_CONFIDENCE);
   }
 
   if (hasAny(normalizedText, ['documento', 'documentacion', 'requisito', 'papeles', 'formato', 'que necesito'])) {
     return buildLocalResult(CONSULTATION_INTENTS.CLAIM_DOCUMENTS, HIGH_CONFIDENCE);
-  }
-
-  if (hasAny(normalizedText, ['iniciar', 'abrir', 'levantar', 'comenzar', 'tramite', 'siniestro', 'reembolso'])) {
-    return buildLocalResult(CONSULTATION_INTENTS.START_CLAIM, HIGH_CONFIDENCE);
   }
 
   if (hasAny(normalizedText, ['poliza', 'cobertura', 'cubre', 'plan', 'perfil', 'deducible', 'suma asegurada', 'circulo medico'])) {
