@@ -92,27 +92,17 @@ function buildGeminiRequest({ text, branchLabel }) {
           'Formato obligatorio:',
           '{"intent":"policy_info","confidence":0.95}',
           '',
+          'Ejemplo si el usuario dice "me acabo de lastimar":',
+          '{"intent":"medical_urgency","confidence":0.95}',
+          '',
           'Si el usuario no es claro, usa la intencion mas probable con confianza baja.',
         ].join('\n'),
       }],
     }],
     generationConfig: {
       temperature: 0,
-      maxOutputTokens: 300,
+      maxOutputTokens: 80,
       responseMimeType: 'application/json',
-      responseSchema: {
-        type: 'OBJECT',
-        properties: {
-          intent: {
-            type: 'STRING',
-            enum: Object.values(CONSULTATION_INTENTS),
-          },
-          confidence: {
-            type: 'NUMBER',
-          },
-        },
-        required: ['intent', 'confidence'],
-      },
     },
   };
 }

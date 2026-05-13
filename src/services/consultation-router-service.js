@@ -65,7 +65,25 @@ function classifyIntentLocally(text) {
     return buildLocalResult(CONSULTATION_INTENTS.HOSPITAL_ENTRY_EXIT, HIGH_CONFIDENCE);
   }
 
-  if (hasAny(normalizedText, ['urgencia', 'emergencia', '911', 'ambulancia', 'accidente', 'dolor fuerte', 'atencion inmediata'])) {
+  if (hasAny(normalizedText, [
+    'urgencia',
+    'emergencia',
+    '911',
+    'ambulancia',
+    'accidente',
+    'dolor fuerte',
+    'atencion inmediata',
+    'lastimar',
+    'lastime',
+    'lesion',
+    'lesionado',
+    'herida',
+    'herido',
+    'golpe',
+    'caida',
+    'fractura',
+    'sangrado',
+  ])) {
     return buildLocalResult(CONSULTATION_INTENTS.MEDICAL_URGENCY, HIGH_CONFIDENCE);
   }
 
