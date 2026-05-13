@@ -43,7 +43,10 @@ async function classifyIntentWithGemini({ text, branchLabel }) {
   const parsed = parseGeminiJson(rawText);
 
   if (!parsed || !validIntentIds.has(parsed.intent)) {
-    logger.warn('Gemini regreso una clasificacion invalida', { rawText });
+    logger.warn('Gemini regreso una clasificacion invalida', {
+      rawText,
+      finishReason: data.candidates?.[0]?.finishReason,
+    });
     return null;
   }
 
@@ -60,13 +63,25 @@ function buildGeminiRequest({ text, branchLabel }) {
     .join('\n');
 
   return {
+    systemInstruction: {
+      parts: [{
+        text: [
+          'Eres un clasificador de intenciones para un bot de seguros.',
+          'No converses con el usuario.',
+          'No expliques tu respuesta.',
+          'No uses markdown.',
+          'No escribas frases como "Here is" o "La respuesta es".',
+          'Tu salida debe ser exclusivamente un objeto JSON valido.',
+        ].join(' '),
+      }],
+    },
     contents: [{
       role: 'user',
       parts: [{
         text: [
           'Clasifica la consulta de un asegurado de InterProteccion.',
           'Debes elegir exactamente una intencion de la lista.',
-          'Responde solamente JSON valido.',
+          'Responde solamente un objeto JSON valido, sin texto antes ni despues.',
           '',
           `Ramo seleccionado: ${branchLabel || 'Sin ramo'}`,
           `Consulta del usuario: ${text}`,
@@ -83,7 +98,7 @@ function buildGeminiRequest({ text, branchLabel }) {
     }],
     generationConfig: {
       temperature: 0,
-      maxOutputTokens: 120,
+      maxOutputTokens: 300,
       responseMimeType: 'application/json',
       responseSchema: {
         type: 'OBJECT',
@@ -112,13 +127,25 @@ function parseGeminiJson(rawText) {
     .replace(/^```\s*/i, '')
     .replace(/```$/i, '')
     .trim();
+  const jsonCandidate = extractJsonObject(cleanText) ?? cleanText;
 
   try {
-    return JSON.parse(cleanText);
+    return JSON.parse(jsonCandidate);
   } catch (error) {
     logger.warn('No se pudo parsear JSON de Gemini', { error: error.message });
     return null;
   }
+}
+
+function extractJsonObject(value) {
+  const start = value.indexOf('{');
+  const end = value.lastIndexOf('}');
+
+  if (start === -1 || end === -1 || end <= start) {
+    return null;
+  }
+
+  return value.slice(start, end + 1);
 }
 
 function normalizeConfidence(value) {
